@@ -1,0 +1,136 @@
+version: "1.0"
+policy_name: "karl-agent-default-policy"
+last_updated: "2026-02-20"
+owners:
+  - "platform-team"
+  - "security-team"
+
+defaults:
+  timezone: "UTC"
+  max_parallel_commands: 4
+  command_timeout_seconds: 600
+  mutation_requires_rollback_plan: true
+  require_evidence_for_all_actions: true
+  require_ticket_for_prod_mutations: true
+
+risk_levels:
+  R0:
+    description: "Read-only operations"
+    allowed_without_approval: true
+  R1:
+    description: "Reversible mutations with low blast radius"
+    allowed_without_approval: true
+  R2:
+    description: "Impactful mutations"
+    allowed_without_approval: false
+  R3:
+    description: "Destructive mutations or potential data loss"
+    allowed_without_approval: false
+
+environment_controls:
+  dev:
+    max_auto_risk: "R1"
+  stage:
+    max_auto_risk: "R1"
+  prod:
+    max_auto_risk: "R0"
+
+approval_rules:
+  - id: "rule-r2"
+    when:
+      min_risk: "R2"
+    required_approvals: 1
+    approver_roles: ["sre-lead", "platform-admin"]
+  - id: "rule-r3"
+    when:
+      min_risk: "R3"
+    required_approvals: 2
+    approver_roles: ["sre-lead", "platform-admin", "security-admin"]
+  - id: "rule-prod-r1"
+    when:
+      environment: "prod"
+      min_risk: "R1"
+    required_approvals: 1
+    approver_roles: ["platform-admin"]
+
+tool_controls:
+  allowlist:
+    - "kubectl get *"
+    - "kubectl describe *"
+    - "kubectl logs *"
+    - "kubectl rollout status *"
+    - "kubectl rollout restart *"
+    - "kubectl scale *"
+    - "helm list *"
+    - "helm history *"
+    - "helm lint *"
+    - "helm template *"
+    - "helm upgrade *"
+    - "helm rollback *"
+    - "git status *"
+    - "git diff *"
+    - "git show *"
+    - "git log *"
+    - "git checkout -b *"
+    - "make *"
+    - "rg *"
+    - "ssh *"
+    - "curl *"
+    - "openssl *"
+  denylist:
+    - "git reset --hard*"
+    - "git clean -fd*"
+    - "rm -rf /*"
+    - "mkfs*"
+    - "dd if=* of=/dev/*"
+    - "shutdown *"
+    - "reboot *"
+    - "kubectl delete namespace kube-system*"
+    - "kubectl delete ns kube-system*"
+
+execution_guards:
+  require_dry_run_when_supported: true
+  require_target_scope:
+    - "environment"
+    - "namespace"
+    - "resource"
+  prevent_broad_selectors: true
+  max_resources_per_mutation: 50
+
+evidence_requirements:
+  mandatory_fields:
+    - "action_id"
+    - "risk_level"
+    - "target_environment"
+    - "command"
+    - "exit_code"
+    - "timestamp_utc"
+  include_artifacts:
+    - "stdout_stderr_excerpt"
+    - "before_after_state"
+    - "diff_or_manifest"
+    - "healthcheck_result"
+
+audit:
+  store_full_command: true
+  store_hash_of_outputs: true
+  retain_days: 365
+  redact_patterns:
+    - "(?i)authorization:\\s*bearer\\s+[A-Za-z0-9\\-\\._~\\+\\/]+=*"
+    - "(?i)password\\s*=\\s*[^\\s]+"
+    - "(?i)client_secret\\s*=\\s*[^\\s]+"
+    - "(?i)token\\s*=\\s*[^\\s]+"
+
+failure_policy:
+  on_command_timeout: "abort_action"
+  on_missing_evidence: "mark_failed"
+  on_failed_healthcheck_after_mutation: "attempt_rollback_then_escalate"
+
+reporting:
+  final_report_sections:
+    - "summary"
+    - "executed_actions"
+    - "evidence"
+    - "risk_and_approvals"
+    - "rollback_status"
+    - "next_steps"
